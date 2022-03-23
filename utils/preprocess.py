@@ -1,6 +1,7 @@
 import torch
 from torchaudio import transforms as T
 
+from typing import Dict, Tuple
 
 class Preprocessing:
     """
@@ -49,7 +50,7 @@ class Preprocessing:
             return torch.sum(waveform) / num_channels
         
         
-    def standardize_sampling_rate(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> (torch.Tensor, torch.Tensor):
+    def standardize_sampling_rate(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Standardize Sampling Rate
         
@@ -98,7 +99,7 @@ class Preprocessing:
         return x
         
         
-    def preprocess_waveform(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> (torch.Tensor, torch.Tensor):
+    def preprocess_waveform(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         
         Preprocess Waveforms. Standardizes channels and sampling rate.
@@ -123,9 +124,9 @@ class Preprocessing:
         
         return waveform, out_sampling_rate
     
-    def tokenize_sentence(self, sentence: str):
+    def tokenize_sentence(self, sentence: str) -> Dict[str, torch.Tensor]:
         """
-        Tokenizes a given sentence.
+        Tokenize and convert a sentence to IDs.
         
         Args:
             sentence: string to be tokenized

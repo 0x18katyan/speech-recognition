@@ -13,6 +13,4 @@ Refer to [Notes](https://github.com/0x18katyan/Notes/tree/master/Speech%20Recogn
 - [ ] Tensorboard Logging
 - [ ] Inference Code
 
-## Known Issues
-
-**Doesn't Work**
+## **Doesn't Work**
