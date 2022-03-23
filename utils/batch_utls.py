@@ -103,11 +103,14 @@ class Collator:
                                              return_tensors = 'pt', 
                                              return_attention_mask=False, 
                                              return_length = True) ##Sentence Lengths required by CTC Loss
-            
+        
+        ## Tokenizer is just returning the maximum length of the batch rather than their true lengths
+        token_lengths = tokenized_sentences['length'] - tokenized_sentences['special_tokens_mask'].sum(dim = 1)
+        
         padded_waveforms = torch.stack([self.pad(waveform, max_len_waveform) for waveform in waveforms])
         
         padded_mel_specs = torch.stack([self.pad(melspec, max_len_melspecs) for melspec in melspecs])
         
         return {"waveforms": padded_waveforms, "waveforms_lengths": waveform_lengths, 
-                "sentences": tokenized_sentences['input_ids'], "sentence_lengths": tokenized_sentences['length'], 
+                "sentences": tokenized_sentences['input_ids'], "sentence_lengths": token_lengths, 
                 "melspecs": padded_mel_specs, "melspecs_lengths": melspecs_lengths}
