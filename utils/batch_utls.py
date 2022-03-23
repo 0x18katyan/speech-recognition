@@ -1,5 +1,7 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
+import random
 
 from typing import List, Dict
 
@@ -22,6 +24,16 @@ class Collator:
         
         self.tokenizer = tokenizer
     
+    @staticmethod
+    def seed_worker(worker_id):
+        """
+        Worker Init Function to ensure reproducibility.
+        """
+        
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+
     def pad(self, tensor: torch.Tensor, target_length: int) -> torch.Tensor:
         
         """
