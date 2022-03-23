@@ -7,8 +7,12 @@ Refer to [Notes](https://github.com/0x18katyan/Notes/tree/master/Speech%20Recogn
 ## TODO
 
 - [x] DataLoading for CommonVoice dataset.
-- [x] Write Encoder-Decoder Model.
-- [x] Perform Loss alignment.
-- [x] Write Training Loop
+- [ ] Write Encoder-Decoder Model.
+- [ ] Perform Loss alignment.
+- [ ] Write Training Loop
 - [ ] Tensorboard Logging
 - [ ] Inference Code
+
+## Known Issues
+
+**Doesn't Work**

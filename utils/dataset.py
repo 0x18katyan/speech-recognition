@@ -1,15 +1,19 @@
 import torch
 import os
+import pandas as pd
+import numpy as np
 
 import torchaudio
 
 from torch.utils.data import Dataset
 
+from typing import Union, Dict
+
 class CommonVoice(Dataset):
     
+        
     def __init__(self, dataset_path: str, split_type: str = 'train', out_channels: int = 2, out_sampling_rate: int = 32000, tokenizer = None):
         
-        import pandas as pd
  
         """
         Iterate over a split of CommonVoice dataset.
@@ -69,102 +73,17 @@ class CommonVoice(Dataset):
             raise ValueError("tokenizer cannot be None.")
         else:
             self.tokenizer = tokenizer
+            
+        ## Initialize Preprocessing
+        
+        self.preprocessing = Preprocessing(out_channels= self.out_channels, out_sampling_rate = self.out_sampling_rate, tokenizer = self.tokenizer)
         
         
     def __len__(self) -> int:
         return len(self.dataframe)
         
-    def standardize_channels(self, waveform: torch.Tensor) -> torch.Tensor:
-        """
-        Standardizes number of channels in a waveform. 
-        
-        Args:
-            waveform: torch.Tensor
-        
-        Returns:
-            waveform: torch.Tensor
-        
-        """
-        
-        num_channels = waveform.shape[0]
-        
-        if num_channels == self.out_channels:
-            return waveform
-        
-        elif num_channels == 1:            
-            return torch.cat((waveform, waveform))
-        
-        elif num_channels > 2:
-            raise TypeError(f"Audio with more than 2 channels are not supported. Wanted maximum of 2 channels, found {num_channels} channels.")
-        
-        
-    def standardize_sampling_rate(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> (torch.Tensor, torch.Tensor):
-        """
-        Standardize Sampling Rate
-        
-        Args:
-            waveform: torch.Tensor
-            sampling_rate: torch.Tensor
-            
-        Returns:
-            waveform: torch.Tensor
-            sampling_rate: torch.Tensor
-        """
-        
-        ##If there are more than 1 channels
-        if waveform.shape[0] > 1:
-        
-            resampled = []
-
-            for i in range(waveform.shape[0]):
-                resampler = torchaudio.transforms.Resample(sampling_rate, self.out_sampling_rate)
-                resampled_channel = resampler(waveform[i, :])
-                resampled.append(resampled_channel)
-        
-            resampled = torch.stack(resampled)
-            return resampled, self.out_sampling_rate
-        
-        ##If there is only 1 channel
-        else:
-            return Resample(sampling_rate, self.out_sampling_rate)(waveform[0, :]), self.out_sampling_rate
-        
-        
-    def preprocess_waveform(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> (torch.Tensor, torch.Tensor):
-        """
-        Preprocess Waveforms. Standardizes channels and sampling rate.
-        
-        Args:
-            waveform: torch.Tensor
-            sampling_rate: torch.Tensor
-            
-        Returns:
-            waveform: torch.Tensor
-            sampling_rate: torch.Tensor
-        """
-        
-        
-        waveform = self.standardize_channels(waveform)
-        
-        waveform, out_sampling_rate = self.standardize_sampling_rate(waveform, sampling_rate)
-        
-        return waveform, out_sampling_rate
     
-    def tokenize_sentence(self, sentence: str):
-        """
-        Tokenizes a given sentence.
-        
-        Args:
-            sentence: string to be tokenized
-        
-        Returns:
-            tokens: list of tokens numericalized
-        """
-
-        encoded = self.tokenizer.encode(sentence)
-        
-        return encoded
-    
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: Union[int, torch.Tensor, np.ndarray]) -> Dict[str, torch.Tensor]:
         
         if isinstance(idx, torch.Tensor):
             idx = list(idx)
@@ -180,11 +99,13 @@ class CommonVoice(Dataset):
         audio_file_path = os.path.join(self.clips_path, item['path'])
         
         waveform, source_sampling_rate = torchaudio.load(audio_file_path)
-        waveform, out_sampling_rate = self.preprocess_waveform(waveform, source_sampling_rate)
-                
+        waveform, out_sampling_rate = self.preprocessing.preprocess_waveform(waveform, source_sampling_rate)
+        
+        melspec = self.preprocessing.extract_features(waveform)
+        
         # item = {'waveform': waveform, 'sentence': sentence, 'age': age, 'gender' : gender, 'accent': accent}
         
-        item = {'waveform': waveform, 'sentence': sentence}
+        item = {'waveform': waveform, 'sentence': sentence, 'melspec': melspec}
         
         return item
     
