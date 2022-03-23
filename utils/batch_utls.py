@@ -102,7 +102,8 @@ class Collator:
                                              padding=True, 
                                              return_tensors = 'pt', 
                                              return_attention_mask=False, 
-                                             return_length = True) ##Sentence Lengths required by CTC Loss
+                                             return_length = True, 
+                                             return_special_tokens_mask=True) ##Sentence Lengths required by CTC Loss
         
         ## Tokenizer is just returning the maximum length of the batch rather than their true lengths
         token_lengths = tokenized_sentences['length'] - tokenized_sentences['special_tokens_mask'].sum(dim = 1)
