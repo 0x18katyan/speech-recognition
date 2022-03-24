@@ -6,7 +6,7 @@ from typing import Dict, Tuple
 class Preprocessing:
     """
     Preprocessing contains utilities for transforming audio and text.
-
+    
     """
     
     
@@ -54,16 +54,17 @@ class Preprocessing:
         """
         Standardize Sampling Rate
         
-        Args:
+        Args: waveform, sampling_rate
             waveform: torch.Tensor
             sampling_rate: torch.Tensor
             
-        Returns:
+        Returns: waveform, sampling_rate
             waveform: torch.Tensor
             sampling_rate: torch.Tensor
         """
         
-        ##If there are more than 1 channels
+        ##If there are more than 1 channel
+        
         if waveform.shape[0] > 1:
         
             resampled = []
@@ -74,11 +75,14 @@ class Preprocessing:
                 resampled.append(resampled_channel)
         
             resampled = torch.stack(resampled)
+            
             return resampled, self.out_sampling_rate
         
         ##If there is only 1 channel
+        
         else:
             return T.Resample(sampling_rate, self.out_sampling_rate)(waveform[0, :]), self.out_sampling_rate
+        
 
     def extract_features(self, waveform: torch.Tensor) -> torch.Tensor:
         """
@@ -128,10 +132,10 @@ class Preprocessing:
         """
         Tokenize and convert a sentence to IDs.
         
-        Args:
+        Args: sentence
             sentence: string to be tokenized
         
-        Returns:
+        Returns: 
             tokens: list of tokens numericalized
         """
 
