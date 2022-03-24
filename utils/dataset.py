@@ -13,8 +13,11 @@ from .preprocess import Preprocessing
 
 class CommonVoice(Dataset):
     
-        
-    def __init__(self, dataset_path: str, split_type: str = 'train', out_channels: int = 2, out_sampling_rate: int = 32000, tokenizer = None):
+    """
+    Utility Class for loading the Common Voice Dataset.
+    """
+    
+    def __init__(self, dataset_path: str, split_type: str = 'train', out_channels: int = 2, out_sampling_rate: int = 16000, tokenizer = None):
         
  
         """
