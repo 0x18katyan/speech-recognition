@@ -9,8 +9,14 @@ class Preprocessing:
     
     """
     
-    
-    def __init__(self, out_channels: int = 2 , out_sampling_rate: int = 16000, n_fft : int = 1024, n_mels: int = 128, tokenizer = None):
+    def __init__(self, 
+                 out_channels: int = 2 , 
+                 out_sampling_rate: int = 16000, 
+                 n_fft : int = 400, 
+                 n_mels: int = 80, 
+                 window_length: int = 25, 
+                 hop_length : int = 10, 
+                 tokenizer = None):
 
         self.out_channels = out_channels
         self.out_sampling_rate = out_sampling_rate
@@ -18,10 +24,15 @@ class Preprocessing:
         
         self.n_fft = n_fft
         self.n_mels = n_mels
+        self.window_length = window_length
+        self.hop_length = hop_length
     
         self.mel_spec_transform = T.MelSpectrogram(sample_rate = self.out_sampling_rate,
                                                    n_fft = self.n_fft,
-                                                  n_mels = self.n_mels)
+                                                   n_mels = self.n_mels,
+                                                   window_length = self.window_length,
+                                                   hop_length = self.hop_length
+                                                   )
         
     def standardize_channels(self, waveform: torch.Tensor) -> torch.Tensor:
         """
