@@ -1,8 +1,13 @@
 from torchinfo import summary
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
-def get_summary(model, dataloader = None, data = None):
+from datetime import datetime
+
+import os
+
+def get_summary(model: torch.nn.Module, dataloader = None, data = None) -> str:
     
     """
     A very very dirty way to get model summary. TODO: Clean up a bit.
@@ -22,7 +27,7 @@ def get_summary(model, dataloader = None, data = None):
 
         break
     
-    return summary(encoder, 
+    return summary(model, 
                    input_data = [melspecs, melspecs_lengths],
                    device=device, 
                    dtypes = [torch.float32, torch.float32], 
@@ -30,3 +35,15 @@ def get_summary(model, dataloader = None, data = None):
                    col_names=["output_size", "num_params"],
                    mode = 'eval', 
                    verbose = 0)
+
+def get_writer(base_log_dir: str, comment = None) -> torch.utils.tensorboard.writer.SummaryWriter:
+    base_log_dir = 'logs/'
+
+    start_time = datetime.now()
+    start_time_fmt = start_time.strftime("%d-%m-%Y %H:%M:%S")
+
+    run_log_dir = os.path.join(base_log_dir, start_time_fmt)
+
+    writer = SummaryWriter(log_dir=run_log_dir, comment = comment)
+    
+    return writer
