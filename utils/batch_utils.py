@@ -71,7 +71,7 @@ class Collator:
             
             1. Applies Tokenization to Sentences.
             
-            2. Pads Waveforms and Mel Specs to the maximum lengths in the bacth.
+            2. Pads Waveforms and Mel Specs to the maximum lengths in the batch.
         
         Args: batch
         
@@ -81,9 +81,11 @@ class Collator:
         
             Dict of Tensors.
             
-            dict = {"waveforms": *padded waveforms*, // (batch, channel, time, amplitude) 
+            dict = {
+                "waveforms": *padded waveforms*, // (batch, channel, time, amplitude) 
                 "sentences": *padded and tokenized sentences*, // (batch, tokens) 
                 "mel_specs": *padded mel spectrograms: *} // (batch, channel, n_mels, timeframes)
+                }
         """
     
         waveforms = [sample['waveform'] for sample in batch]

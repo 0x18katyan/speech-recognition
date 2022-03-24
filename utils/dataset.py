@@ -7,7 +7,7 @@ import torchaudio
 
 from torch.utils.data import Dataset
 
-from typing import Union, Dict
+from typing import Union, Dict, Optional
 
 from .preprocess import Preprocessing
 
@@ -17,19 +17,22 @@ class CommonVoice(Dataset):
     Utility Class for loading the Common Voice Dataset.
     """
     
-    def __init__(self, dataset_path: str, split_type: str = 'train', out_channels: int = 2, out_sampling_rate: int = 16000, tokenizer = None):
+    def __init__(self, dataset_dir: str,  subset_name: str = None, subset_path: Optional[str] = None, out_channels: int = 2, out_sampling_rate: int = 16000, tokenizer = None):
         
  
         """
-        Iterate over a split of CommonVoice dataset.
+        Iterate over a subset CommonVoice dataset.
         
-        Parameters
+        Args:
         ----------
-        dataset_path: str
+        dataset_dir: str
             The path where train.tsv, test.tsv and dev.tsv are located.
         
-        split_type: str [train, test, dev]
-            Loads one of train.tsv, test.tsv or dev.tsv
+        subset_path: str
+            Filename of the dataset tsv. Must contain columns path and sentence. Cannot be used with subset_name. 
+        
+        subset_name: str [train, test, dev]
+            Loads one of train.tsv, test.tsv or dev.tsv from the dataset_dir. Cannot be used with subset_path.
         
         out_channels: int 
             Number of output channels for audio. 
@@ -40,12 +43,17 @@ class CommonVoice(Dataset):
         
         tokenizer: transformers.PreTrainedTokenizerFast
             tokenizer: tokenizer from huggingface used for tokenizing.
+        
+        Returns:
+        ----------
+        CommonVoice Dataset object.
+        
         """
         
         super(CommonVoice).__init__()
                 
-        self.split_type = split_type
-        self.dataset_path = dataset_path
+        self.split_type = subset_name
+        self.dataset_path = dataset_dir
         
         ##Check that out_sampling_rate is an integer. Will probably need to specify how to convert Khz to Hz.
         assert isinstance(out_sampling_rate, int)
@@ -58,17 +66,28 @@ class CommonVoice(Dataset):
             raise ValueError("Only Mono (out_channels = 1) and Stereo (out_channels = 2) Supported.")
         
         ##Check that dataset exists in the path specified and add clips path.
-        if os.path.exists(dataset_path):
-            self.clips_path = os.path.join(dataset_path, 'clips')
+        if os.path.exists(dataset_dir):
+            self.clips_path = os.path.join(dataset_dir, 'clips')
         else:
-            raise ValueError(f"{dataset_path} doesn't exist, please provide a valid path to the dataset.")
+            raise ValueError(f"{dataset_dir} doesn't exist, please provide a valid path to the dataset.")
         
         ##Check that split_type is one of train, test, dev.
-        if split_type in ['train', 'test' , 'dev']:
-            fullpath = os.path.join(dataset_path, split_type + '.tsv')
+        if subset_path == None and subset_name != None:
+
+            if subset_name in ['train', 'test' , 'dev']:
+                fullpath = os.path.join(dataset_dir, subset_name + '.tsv')
+            else:
+                raise ValueError("split_type must be one of train, test or dev")
+
+        elif subset_path != None and subset_name != None:
+            raise ValueError("Please only use one of [split_type] or [data_file_path].")
+
+        elif subset_path == None and subset_name == None:
+            raise ValueError("Please pass value for either data_file_path or split_type.")
+
         else:
-            raise ValueError("split_type must be one of train, test or dev")
-        
+            fullpath = subset_path
+            
         ## Load the dataframe
         self.dataframe = pd.read_csv(fullpath, sep = '\t')
         
@@ -97,9 +116,11 @@ class CommonVoice(Dataset):
         
         sentence = item['sentence']
         
-        age = item['age']
-        gender = item['gender']
-        accent = item['accents']
+        ## Don't need it right now, enable if needed later
+        
+        # age = item['age']
+        # gender = item['gender']
+        # accent = item['accents']
         
         audio_file_path = os.path.join(self.clips_path, item['path'])
         
