@@ -21,11 +21,13 @@ class Preprocessing:
         self.out_sampling_rate = out_sampling_rate
         self.tokenizer = tokenizer
         
+        ## 1 ms is 1/1000th of a second and 1 second = 1 * sampling_rate.
+        
         if n_fft == None:
-            n_fft = out_sampling_rate // 25 ## 25 ms n_fft window ##Conformer Paper
+            n_fft = int(out_sampling_rate * (25 / 1000)) ## 25 ms n_fft window ##Conformer Paper
         
         if hop_length == None:
-            hop_length = out_sampling_rate // 100 ## 10 ms hop length ##Conformer Paper
+            hop_length = int(out_sampling_rate * (10 / 100)) ## 10 ms hop_length ##Conformer Paper
         
         self.n_fft = n_fft
         self.n_mels = n_mels
