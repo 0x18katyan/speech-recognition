@@ -1,135 +1,257 @@
+from unicodedata import bidirectional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.nn.utils.rnn import PackedSequence
+from torch.nn.utils.rnn import PackedSequence, pad_packed_sequence, pack_padded_sequence
 
 import torchaudio
 
 from typing import Tuple
 
+from utils.attention import BadhanauAttention
+
 class Encoder(nn.Module):
     
     def __init__(self, 
-                 encoder_input_dim: int = 80, 
-                 num_heads: int = 4, 
-                 ffn_dim: int = 80, 
-                 num_layers: int = 4, 
-                 depthwise_conv_kernel_size: int = 31, 
-                 dropout: float = 0.3,
-                 **args):
-        
+                 encoder_input_size: int = 80,
+                 conformer_num_heads: int = 4, 
+                 conformer_ffn_size: int = 80, 
+                 conformer_num_layers: int = 4, 
+                 conformer_conv_kernel_size: int = 31, 
+                 encoder_rnn_hidden_size: int = 256,
+                 encoder_rnn_num_layers: int = 1,
+                 encoder_rnn_bidirectional: bool = False,
+                 batch_first: bool = True,
+                 dropout: float = 0.3):
+            
         super(Encoder, self).__init__()
         
-        self.conformer = torchaudio.models.Conformer(input_dim = encoder_input_dim,
-                                                     num_heads = num_heads,
-                                                     ffn_dim = ffn_dim,
-                                                     num_layers = num_layers,
-                                                     depthwise_conv_kernel_size = depthwise_conv_kernel_size,
+        self.conformer = torchaudio.models.Conformer(input_dim = encoder_input_size,
+                                                     num_heads = conformer_num_heads,
+                                                     ffn_dim = conformer_ffn_size,
+                                                     num_layers = conformer_num_layers,
+                                                     depthwise_conv_kernel_size = conformer_conv_kernel_size,
                                                      dropout = dropout)
+        
+        self.rnn = nn.GRU(input_size = encoder_input_size, 
+                          hidden_size = encoder_rnn_hidden_size, 
+                          num_layers = encoder_rnn_num_layers, 
+                          batch_first = batch_first, 
+                          dropout = dropout, 
+                          bidirectional = encoder_rnn_bidirectional)
                 
-    def forward(self, x: torch.Tensor, x_lens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        self.tanh_layer = nn.Tanh()
         
-        x, x_lens = self.conformer.forward(x, x_lens)
+                
+    def forward(self, x: torch.Tensor, x_lens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Encodes the incoming spectrograms or waveforms using Conformer and an RNN.
+
+        Args:
+            x (torch.Tensor): feature inputs, should be 3D.
+            x_lens (torch.Tensor): feature input lengths, used for identifying lengths before padding.
+
+        Returns: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: 
+            
+            outputs: consist of the hidden states at each timestep, is a packed_sequence
+            output_lengths: the length of outputs before padding
+            hidden: is the last hidden state of the encoder rnn
+        """
+        outputs, output_lens = self.conformer.forward(x, x_lens)
         
-        return x, x_lens
+        packed_encoder_outputs = pack_padded_sequence(outputs, 
+                                                      lengths = output_lens.to(device = 'cpu', dtype=torch.int64), 
+                                                      batch_first = self.batch_first, 
+                                                      enforce_sorted = False)
+        
+        outputs, hidden = F.gelu(self.rnn(x))
+        
+        return outputs, output_lens, hidden
     
 class RNNDecoder(nn.Module):
     
-    def __init__(self, 
-                 decoder_input_dim: int = 80, 
-                 decoder_hidden_size: int = 256, 
-                 num_layers: int = 1, 
-                 bidirectional: bool = False, 
-                 output_dim: int = None, 
-                 **args):
+    def __init__(self,
+                 encoder_rnn_hidden_size: int = 256,
+                 decoder_embedding_size: int = 300,
+                 decoder_hidden_size: int = 256,
+                 decoder_attn_size: int = 84,
+                 decoder_num_layers: int = 1,
+                 decoder_bidirectional: bool = False, 
+                 vocab_size: int = None,
+                 batch_first: bool = True,
+                 dropout: float = 0.3,
+                 device: str = "cpu",
+                 padding_idx: int = 0):
         
         super(RNNDecoder, self).__init__()
         
-        if output_dim == None:
-            raise ValueError("Please specify the output size of the vocab.")
-            
-        directions = 2 if bidirectional == True else 1
+        self.decoder_hidden_dim = decoder_hidden_size
+        self.device = device
         
-        self.model = nn.GRU(input_size = decoder_input_dim, hidden_size = decoder_hidden_size, num_layers = num_layers, batch_first = False)
-        self.ffn = nn.Sequential(nn.Linear(in_features = decoder_hidden_size * directions, out_features = 1024), 
-                                 nn.GLU(), 
-                                 nn.Dropout(0.5), 
-                                 nn.Linear(in_features = 512, out_features = output_dim))
+        if vocab_size == None:
+            raise ValueError("Please specify the output size of the vocab.")
+        
+        self.batch_first = batch_first
+        
+        directions = 2 if decoder_bidirectional == True else 1
+        
+        self.emb = nn.Embedding(num_embeddings = vocab_size, embedding_dim = decoder_embedding_size, padding_idx = padding_idx)
+        
+        self.rnn = nn.GRU(input_size = decoder_hidden_size + decoder_embedding_size,
+                          
+                          hidden_size = decoder_hidden_size, 
+                          num_layers = decoder_num_layers, 
+                          batch_first = batch_first, 
+                          dropout = dropout)
+        
+        self.attention_layer = BadhanauAttention(encoder_hidden_dim = encoder_rnn_hidden_size, 
+                                                 decoder_hidden_dim = decoder_hidden_size, 
+                                                 attention_dim = decoder_attn_size)
+        
+        # self.attention_layer = Attention(enc_hid_dim=encoder_input_dim, dec_hid_dim=decoder_hidden_size)
+        
+        self.predictor = nn.Linear(in_features = decoder_hidden_size * directions, out_features = vocab_size)
+        self.tanh_layer = nn.Tanh()
+
                                 
-    def forward(self, x: torch.Tensor, hidden_state: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]: 
+    def forward(self, x: torch.LongTensor, encoder_outputs: torch.Tensor, hidden_state: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]: 
+        """ Conducts a forward pass through the rnn decoder network.
+        
+        Args:
+            x (torch.LongTensor): indices for the input, this is converted into embeddings.
+            encoder_outputs (torch.Tensor): outputs from the encoder.
+            hidden_state (torch.Tensor, optional): Hidden state is needed, either in the form of encoder_hidden_state or decoder_hidden_state. Defaults to None.
+
+        Returns:
+            Tuple[torch.Tensor, torch.Tensor]: returns the outputs and the current hidden state of the rnn.
         """
-        Hidden state is needed, either in the form of encoder_hidden_state or decoder_hidden_state
-        """
+        
+        x_embedded = self.emb(x)
+        x_embedded = F.gelu(x_embedded)
         
         if hidden_state == None:
-            outputs, hidden_state = self.model(x)
+            hidden_state = torch.zeros(1, encoder_outputs.shape[0], self.decoder_hidden_dim, device=self.device)
         
-        else:
-            outputs, hidden_state = self.model(x, hidden_state)
+        output, context_vector = self.attention_layer(encoder_outputs, hidden_state.permute(1, 0, 2))
         
-        if isinstance(x, PackedSequence):
+        combined_input = torch.cat([output, x_embedded], dim = -1)
+        
+        outputs, hidden_state = self.rnn(combined_input, hidden_state)
+        
+        if isinstance(x_embedded, PackedSequence):
             outputs, _ = pad_packed_sequence(outputs)
         
-        outputs = self.ffn(outputs)
+        if self.batch_first == True:
+            outputs = outputs.transpose(0, 1)
+            hidden_state = hidden_state.transpose(0, 1)
+        
+        outputs = self.predictor(outputs).squeeze(0)
         
         return outputs, hidden_state
 
 class Model(nn.Module):
     
-    def __init__(self, encoder_input_dim: int = 80,
-                encoder_num_heads: int = 4, 
-                encoder_ffn_dim: int = 144, 
-                encoder_num_layers: int = 16, 
-                encoder_depthwise_conv_kernel_size: int = 31, 
-                decoder_hidden_size:int = 80,
-                decoder_num_layers: int = 2,
-                bidirectional_decoder: bool = False,
-                vocab_size: int = None,
-                padding_idx: int = None,
-                sos_token_id: int = None):
+    def __init__(self, 
+                encoder_input_size: int = 80,
+                conformer_num_heads: int = 4,
+                conformer_ffn_size: int = 144,
+                conformer_num_layers: int = 16,
+                conformer_conv_kernel_size: int = 31,
+                encoder_rnn_hidden_size: int = 256,
+                encoder_rnn_num_layers: int = 1,
+                encoder_rnn_bidirectional: int = False,
+                decoder_embedding_size: int = 300,
+                decoder_hidden_size: int = 256,
+                decoder_num_layers: int = 1,
+                decoder_bidirectional: int = False,
+                decoder_attn_size: int = 84,
+                dropout: float = 0.3,
+                padding_idx: int = 4,
+                sos_token_id: int = 0,
+                vocab_size: int = 1000,
+                batch_first: bool = True,
+                device: str =  "cpu",
+                *args,
+                **kwargs):
         
-        super(Model, self).__init__()
-        
-        self.encoder = Encoder(input_dim = encoder_input_dim,
-                              num_heads = encoder_num_heads,
-                              ffn_dim = encoder_ffn_dim,
-                              depthwise_conv_kernel_size = encoder_depthwise_conv_kernel_size)
-        
-        self.decoder = RNNDecoder(input_dim = encoder_input_dim,
-                                  hidden_size = decoder_hidden_size,
-                                  num_layers = decoder_num_layers,
-                                  bidirectional = bidirectional_decoder,
-                                  output_dim = vocab_size)
-        
-        self.sos_token_id = sos_token_id
-        
-    def forward(self, x: torch.Tensor, x_lens: torch.Tensor):
-        
-        decoded = []
-        
-        bsz, msl, hdz = x.shape ##batch_size, max sequence length, hidden dimension size
-
-        encoder_outputs = self.encoder(x, x_lens)
+        super(Model, self).__init__(*args, **kwargs)
                 
-        decoder_inputs = encoder_outputs
+        self.encoder_rnn_directions = 1 if encoder_rnn_bidirectional == False else 2
+        self.decoder_rnn_directions = 1 if decoder_bidirectional == False else 2
         
-        ## Start with the <sos> token
-        x = torch.LongTensor([self.sos_token_id]).repeat(bsz).reshape(bsz, 1).to(device)
+        self.encoder = Encoder(encoder_input_size = encoder_input_size,
+                               conformer_num_heads=conformer_num_heads,
+                               conformer_ffn_size = conformer_ffn_size,
+                               conformer_num_layers=conformer_num_layers,
+                               conformer_conv_kernel_size=conformer_conv_kernel_size,
+                               encoder_rnn_num_layers=encoder_rnn_num_layers,
+                               encoder_rnn_hidden_size = encoder_rnn_hidden_size,
+                               batch_first = batch_first,
+                               padding_idx = padding_idx,
+                               dropout = dropout,
+                               device= device
+                               )
+        
+        self.decoder = RNNDecoder(encoder_rnn_hidden_size = encoder_rnn_hidden_size,
+                                  decoder_embedding_size = decoder_embedding_size,
+                                  decoder_hidden_size = decoder_hidden_size,
+                                  decoder_num_layers = decoder_num_layers,
+                                  decoder_bidirectional = decoder_bidirectional,
+                                  decoder_attn_size = decoder_attn_size,
+                                  vocab_size = vocab_size,
+                                  batch_first = batch_first,
+                                  dropout = dropout,
+                                  device = device,
+                                  padding_idx = padding_idx
+                                  )
+                
+        self.sos_token_id = sos_token_id
+        self.batch_first = batch_first
+        self.vocab_size = vocab_size
+        self.device = device
+        
+    def forward(self, x: torch.Tensor, x_lens: torch.Tensor, y: torch.Tensor, y_lens: torch.Tensor) -> torch.Tensor:
+        """Forward pass used during Training.
 
-        for t in range(msl):
+        Args:
+            x (torch.Tensor): the source waveform or spectrogram inputs
+            x_lens (torch.Tensor): the lengths of the source inputs before padding
+            y (torch.Tensor): the target sentences to be predicted from the inputs
+            y_lens (torch.Tensor): the lengths of the target sentences 
+
+        Returns:
+            torch.Tensor: the predicted tensor of shape = y.shape
+        """
+                
+        encoder_outputs, encoder_output_lengths, encoder_hidden_state = self.encoder(x, x_lens)
+
+        ## First decoder hidden state is the encoder hidden state
+        decoder_hidden_state = encoder_hidden_state.unsqueeze(0)
+
+        ##encoder_outputs: [seq_len, batch_size, hidden_dim]
+        if self.batch_first:
+            bsz, msl, hdz = x.shape ##batch_size, max sequence length, hidden dimension size
+        else:
+            msl, bsz, hdz = x.shape
+        
+        decoder_inputs = encoder_hidden_state
+        
+        ## predicted_tensor shape [max_seq_len, batch_size, vocab_size]
+        predicted_tensor = torch.zeros(y.shape[1], y.shape[0], self.vocab_size, device = self.device)
+
+        max_tgt_len = y.shape[-1]
+        
+        decoder_inputs = y[:, 0, :] ## for batch first, need to test 
+
+        for i in range(0, max_tgt_len):
+
+            decoder_outputs, decoder_hidden_state = self.decoder(decoder_inputs, encoder_outputs, decoder_hidden_state)
+            decoder_hidden_state = decoder_hidden_state.permute(1, 0, 2)
+
+            topv, topi = torch.topk(decoder_outputs, k = 1, dim = -1) ## get the topv values and topindices, don't need right now might need for beam search
             
-            if t == 0:
-                decoder_output, decoder_hidden_state = self.decoder(x = decoder_inputs)            
-            else:
-                decoder_output, decoder_hidden_state = self.decoder(x = decoder_inputs, hidden_state = decoder_hidden_state)
+            decoder_inputs = topi.squeeze(0) ## With no teacher forcing, might need to add code for teacher forcing
             
-            word = F.log_softmax(decoder_output, dim = -1) ## have to do log_softmax for CTC Loss
+            predicted_tensor[i] = decoder_outputs
             
-            topv, topi = decoder_output.topk(1)
-            
-            x = topv.squeeze().detach()
-            
-            decoded.append(topv)
-            
-        return encoder_outputs, torch.stack(decoded)
+        return predicted_tensor
