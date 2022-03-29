@@ -27,6 +27,8 @@ class Encoder(nn.Module):
             
         super(Encoder, self).__init__()
         
+        self.batch_first = batch_first
+        
         self.conformer = torchaudio.models.Conformer(input_dim = encoder_input_size,
                                                      num_heads = conformer_num_heads,
                                                      ffn_dim = conformer_ffn_size,
@@ -44,12 +46,12 @@ class Encoder(nn.Module):
         self.tanh_layer = nn.Tanh()
         
                 
-    def forward(self, x: torch.Tensor, x_lens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor, x_lens: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Encodes the incoming spectrograms or waveforms using Conformer and an RNN.
 
         Args:
             x (torch.Tensor): feature inputs, should be 3D.
-            x_lens (torch.Tensor): feature input lengths, used for identifying lengths before padding.
+            x_lens (torch.Tensor): feature input lengths, used for identifying lengths before padding. None if batch_size = 1.
 
         Returns: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: 
             
@@ -57,14 +59,17 @@ class Encoder(nn.Module):
             output_lengths: the length of outputs before padding
             hidden: is the last hidden state of the encoder rnn
         """
-        outputs, output_lens = self.conformer.forward(x, x_lens)
+        if x_lens == None:
+            outputs, output_lens = self.conformer.forward(x)
+        else:    
+            outputs, output_lens = self.conformer.forward(x, x_lens)
         
         packed_encoder_outputs = pack_padded_sequence(outputs, 
                                                       lengths = output_lens.to(device = 'cpu', dtype=torch.int64), 
                                                       batch_first = self.batch_first, 
                                                       enforce_sorted = False)
         
-        outputs, hidden = F.gelu(self.rnn(x))
+        outputs, hidden = self.rnn(x)
         
         return outputs, output_lens, hidden
     
@@ -126,14 +131,13 @@ class RNNDecoder(nn.Module):
             Tuple[torch.Tensor, torch.Tensor]: returns the outputs and the current hidden state of the rnn.
         """
         
+        ## Add Batch dimension for unbatched inputs
+
         x_embedded = self.emb(x)
         x_embedded = F.gelu(x_embedded)
-        
-        if hidden_state == None:
-            hidden_state = torch.zeros(1, encoder_outputs.shape[0], self.decoder_hidden_dim, device=self.device)
-        
+                
         output, context_vector = self.attention_layer(encoder_outputs, hidden_state.permute(1, 0, 2))
-        
+                        
         combined_input = torch.cat([output, x_embedded], dim = -1)
         
         outputs, hidden_state = self.rnn(combined_input, hidden_state)
@@ -145,7 +149,7 @@ class RNNDecoder(nn.Module):
             outputs = outputs.transpose(0, 1)
             hidden_state = hidden_state.transpose(0, 1)
         
-        outputs = self.predictor(outputs).squeeze(0)
+        outputs = F.log_softmax(self.predictor(outputs).squeeze(0), dim = -1)
         
         return outputs, hidden_state
 
@@ -187,9 +191,7 @@ class Model(nn.Module):
                                encoder_rnn_num_layers=encoder_rnn_num_layers,
                                encoder_rnn_hidden_size = encoder_rnn_hidden_size,
                                batch_first = batch_first,
-                               padding_idx = padding_idx,
                                dropout = dropout,
-                               device= device
                                )
         
         self.decoder = RNNDecoder(encoder_rnn_hidden_size = encoder_rnn_hidden_size,
@@ -224,10 +226,10 @@ class Model(nn.Module):
         """
                 
         encoder_outputs, encoder_output_lengths, encoder_hidden_state = self.encoder(x, x_lens)
-
+        
         ## First decoder hidden state is the encoder hidden state
-        decoder_hidden_state = encoder_hidden_state.unsqueeze(0)
-
+        decoder_hidden_state = encoder_hidden_state
+        
         ##encoder_outputs: [seq_len, batch_size, hidden_dim]
         if self.batch_first:
             bsz, msl, hdz = x.shape ##batch_size, max sequence length, hidden dimension size
@@ -236,14 +238,14 @@ class Model(nn.Module):
         
         decoder_inputs = encoder_hidden_state
         
+        max_tgt_len = y.shape[-1] - 1 ## Minus the sos tokens
+
         ## predicted_tensor shape [max_seq_len, batch_size, vocab_size]
-        predicted_tensor = torch.zeros(y.shape[1], y.shape[0], self.vocab_size, device = self.device)
-
-        max_tgt_len = y.shape[-1]
+        predicted_tensor = torch.zeros(max_tgt_len, y.shape[0], self.vocab_size, device = self.device)
+                
+        decoder_inputs = y[:, 0].unsqueeze(1) ## for batch first, need to test
         
-        decoder_inputs = y[:, 0, :] ## for batch first, need to test 
-
-        for i in range(0, max_tgt_len):
+        for i in range(0, max_tgt_len): 
 
             decoder_outputs, decoder_hidden_state = self.decoder(decoder_inputs, encoder_outputs, decoder_hidden_state)
             decoder_hidden_state = decoder_hidden_state.permute(1, 0, 2)
@@ -253,5 +255,7 @@ class Model(nn.Module):
             decoder_inputs = topi.squeeze(0) ## With no teacher forcing, might need to add code for teacher forcing
             
             predicted_tensor[i] = decoder_outputs
-            
+        
+        ##predicted_tensor is changed from [seq, batch, vocab_size] to [batch, seq , vocab_size]
+        predicted_tensor = predicted_tensor.permute(1,0,2)
         return predicted_tensor
