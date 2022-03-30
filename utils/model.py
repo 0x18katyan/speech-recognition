@@ -117,9 +117,8 @@ class RNNDecoder(nn.Module):
         self.attention_layer = DotProductAttention(enc_hid_dim=encoder_rnn_hidden_size, 
                                                    dec_hid_dim=decoder_hidden_size)
               
-        self.predictor = nn.Linear(in_features = decoder_hidden_size * directions, out_features = vocab_size)
+        self.predictor = nn.Linear(in_features = decoder_hidden_size * directions * decoder_num_layers, out_features = vocab_size)
         self.tanh_layer = nn.Tanh()
-
                                 
     def forward(self, x: torch.LongTensor, encoder_outputs: torch.Tensor, hidden_state: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]: 
         """ Conducts a forward pass through the rnn decoder network.
@@ -136,7 +135,7 @@ class RNNDecoder(nn.Module):
         ## Add Batch dimension for unbatched inputs
 
         x_embedded = self.emb(x)
-        x_embedded = F.gelu(x_embedded)
+        x_embedded = F.relu(x_embedded)
                 
         alignment_scores = self.attention_layer(encoder_outputs, hidden_state.permute(1, 0, 2))
         
@@ -221,6 +220,8 @@ class Model(nn.Module):
         self.vocab_size = vocab_size
         self.device = device
         
+        self.teacher_forcing = 0.75
+        
     def forward(self, x: torch.Tensor, x_lens: torch.Tensor, y: torch.Tensor, y_lens: torch.Tensor) -> torch.Tensor:
         """Forward pass used during Training.
 
@@ -244,16 +245,14 @@ class Model(nn.Module):
             bsz, msl, hdz = x.shape ##batch_size, max sequence length, hidden dimension size
         else:
             msl, bsz, hdz = x.shape
-        
-        decoder_inputs = encoder_hidden_state
-        
+                
         max_tgt_len = y.shape[-1] - 1 ## Minus the sos tokens
 
         ## predicted_tensor shape [max_seq_len, batch_size, vocab_size]
         predicted_tensor = torch.zeros(max_tgt_len, y.shape[0], self.vocab_size, device = self.device)
                 
-        decoder_inputs = y[:, 0].unsqueeze(1) ## for batch first, need to test
-        
+        decoder_inputs = y[:, 0].unsqueeze(1) ## the sos token
+                
         for i in range(0, max_tgt_len): 
 
             decoder_outputs, decoder_hidden_state = self.decoder(decoder_inputs, encoder_outputs, decoder_hidden_state)
@@ -261,7 +260,13 @@ class Model(nn.Module):
 
             topv, topi = torch.topk(decoder_outputs, k = 1, dim = -1) ## get the topv values and topindices, don't need right now might need for beam search
             
-            decoder_inputs = topi.squeeze(0) ## With no teacher forcing, might need to add code for teacher forcing
+            if torch.rand(1) <= self.teacher_forcing:
+                
+                decoder_inputs = y[:, i + 1] ##because at i, the target is i+1
+                decoder_inputs = decoder_inputs.unsqueeze(1) ## Convert from [batch] to [batch, 1]
+                
+            else:
+                decoder_inputs = topi.squeeze(0) ## With no teacher forcing, might need to add code for teacher forcing
             
             predicted_tensor[i] = decoder_outputs
         
