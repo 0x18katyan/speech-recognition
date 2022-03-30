@@ -9,7 +9,7 @@ import torchaudio
 
 from typing import Tuple
 
-from utils.attention import BadhanauAttention
+from utils.attention import *
 
 class Encoder(nn.Module):
     
@@ -102,19 +102,21 @@ class RNNDecoder(nn.Module):
         
         self.emb = nn.Embedding(num_embeddings = vocab_size, embedding_dim = decoder_embedding_size, padding_idx = padding_idx)
         
-        self.rnn = nn.GRU(input_size = decoder_hidden_size + decoder_embedding_size,
+        self.rnn = nn.GRU(input_size = decoder_hidden_size + encoder_rnn_hidden_size + decoder_embedding_size,
                           
                           hidden_size = decoder_hidden_size, 
                           num_layers = decoder_num_layers, 
                           batch_first = batch_first, 
                           dropout = dropout)
         
-        self.attention_layer = BadhanauAttention(encoder_hidden_dim = encoder_rnn_hidden_size, 
-                                                 decoder_hidden_dim = decoder_hidden_size, 
-                                                 attention_dim = decoder_attn_size)
+        # self.attention_layer = BadhanauAttention(encoder_hidden_size = encoder_rnn_hidden_size, 
+        #                                          decoder_hidden_size = decoder_hidden_size, 
+        #                                          attention_dim = decoder_attn_size)
         
         # self.attention_layer = Attention(enc_hid_dim=encoder_input_dim, dec_hid_dim=decoder_hidden_size)
-        
+        self.attention_layer = DotProductAttention(enc_hid_dim=encoder_rnn_hidden_size, 
+                                                   dec_hid_dim=decoder_hidden_size)
+              
         self.predictor = nn.Linear(in_features = decoder_hidden_size * directions, out_features = vocab_size)
         self.tanh_layer = nn.Tanh()
 
@@ -136,10 +138,17 @@ class RNNDecoder(nn.Module):
         x_embedded = self.emb(x)
         x_embedded = F.gelu(x_embedded)
                 
-        output, context_vector = self.attention_layer(encoder_outputs, hidden_state.permute(1, 0, 2))
-                        
-        combined_input = torch.cat([output, x_embedded], dim = -1)
+        alignment_scores = self.attention_layer(encoder_outputs, hidden_state.permute(1, 0, 2))
         
+        ##Apply the alignment scores to the encoder_hidden_states and calculate the weighted average
+        ##context_vector shape == [batch_size, 1 , encoder_hidden_size]
+        context_vector = torch.bmm(alignment_scores.permute(0, 2, 1), encoder_outputs) ## context vector is how luong defines this
+                
+        ## changing hidden_state from [seq, batch, hidden] to [batch, seq, hidden]
+        output = torch.concat([hidden_state.permute(1, 0, 2), context_vector], dim = -1)
+        
+        combined_input = torch.cat([output, x_embedded], dim = -1)
+                
         outputs, hidden_state = self.rnn(combined_input, hidden_state)
         
         if isinstance(x_embedded, PackedSequence):
