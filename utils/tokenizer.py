@@ -6,6 +6,8 @@ from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
 from tokenizers.processors import TemplateProcessing
 from tokenizers.pre_tokenizers import Whitespace, Digits, Sequence
+from tokenizers import normalizers
+from tokenizers.normalizers import NFD, StripAccents, Lowercase
 
 import pandas as pd
 from pandas import Series
@@ -14,7 +16,7 @@ from pandas import Series
 def train_tokenizer(tokenizer_file_path: str, 
                     text: Union[Series, List[str]], 
                     special_tokens: Optional[List[str]], 
-                    vocab_size: Optional[int] = 1000, 
+                    vocab_size: Optional[int] = 50, 
                     min_frequency: Optional[int] = 5) -> PreTrainedTokenizerFast:
     
     """Trains a Tokenizer on given text.
@@ -28,8 +30,10 @@ def train_tokenizer(tokenizer_file_path: str,
     
     special_tokens= ["[BLANK]", "[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"]
     tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
-    trainer = BpeTrainer(vocab_size = 1000, min_frequency = 5, special_tokens = special_tokens)
+    trainer = BpeTrainer(vocab_size = vocab_size, min_frequency = min_frequency, special_tokens = special_tokens)
 
+    normalizer = normalizers.Sequence([NFD(), StripAccents(), Lowercase()])
+    tokenizer.normalizer = normalizer
     tokenizer.pre_tokenizer = Sequence([Whitespace(), Digits(individual_digits=True)])
     
     tokenizer.post_processor = TemplateProcessing(single="[BOS] $A [EOS]",
