@@ -99,7 +99,5 @@ class DotProductAttention(nn.Module):
         super().__init__()
         
     def forward(self, encoder_outputs, hidden):
-        
-        scores = torch.bmm(encoder_outputs, hidden.permute(0, 2, 1))
-        
+        scores = torch.bmm(encoder_outputs, hidden.permute(1, 2, 0))
         return F.softmax(scores, dim=1)

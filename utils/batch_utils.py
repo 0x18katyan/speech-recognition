@@ -114,6 +114,8 @@ class Collator:
         
         padded_mel_specs = torch.stack([self.pad(melspec, max_len_melspecs) for melspec in melspecs])
         
+        del waveforms, sentences, melspecs ## Clean up 
+        
         return {"waveforms": padded_waveforms, "waveforms_lengths": waveform_lengths, 
                 "sentences": tokenized_sentences['input_ids'], "sentence_lengths": token_lengths, 
                 "melspecs": padded_mel_specs, "melspecs_lengths": melspecs_lengths}
