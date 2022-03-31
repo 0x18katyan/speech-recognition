@@ -15,17 +15,20 @@ class Encoder(nn.Module):
     
     def __init__(self, 
                  encoder_input_size: int = 80,
+                 decoder_hidden_size: int = 256,
                  conformer_num_heads: int = 4, 
                  conformer_ffn_size: int = 80, 
                  conformer_num_layers: int = 4, 
                  conformer_conv_kernel_size: int = 31, 
                  encoder_rnn_hidden_size: int = 256,
                  encoder_rnn_num_layers: int = 1,
-                 encoder_rnn_bidirectional: bool = False,
+                 encoder_rnn_bidirectional: bool = True,
                  batch_first: bool = True,
                  dropout: float = 0.3):
             
         super(Encoder, self).__init__()
+        
+        directions = 2 if encoder_rnn_bidirectional else 1
         
         self.batch_first = batch_first
         
@@ -42,7 +45,8 @@ class Encoder(nn.Module):
                           batch_first = batch_first, 
                           dropout = dropout, 
                           bidirectional = encoder_rnn_bidirectional)
-                
+        
+        self.proj_fc = nn.Linear(encoder_rnn_hidden_size * directions, decoder_hidden_size)
         self.tanh_layer = nn.Tanh()
         
                 
@@ -71,17 +75,21 @@ class Encoder(nn.Module):
         
         outputs, hidden = self.rnn(x)
         
+        concat_last_layer = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim = 1) ## Since, it is bidirectional, -2 and -1 are forward and backward pass of the last layer
+        hidden = self.tanh_layer(self.proj_fc(concat_last_layer)) # project into decoder hidden_size
+        hidden = hidden.unsqueeze(0)
+        
         return outputs, output_lens, hidden
     
 class RNNDecoder(nn.Module):
     
     def __init__(self,
                  encoder_rnn_hidden_size: int = 256,
+                 encoder_rnn_bidirectional: bool = True, 
                  decoder_embedding_size: int = 300,
                  decoder_hidden_size: int = 256,
                  decoder_attn_size: int = 84,
                  decoder_num_layers: int = 1,
-                 decoder_bidirectional: bool = False, 
                  vocab_size: int = None,
                  batch_first: bool = True,
                  dropout: float = 0.3,
@@ -98,12 +106,11 @@ class RNNDecoder(nn.Module):
         
         self.batch_first = batch_first
         
-        directions = 2 if decoder_bidirectional == True else 1
+        directions = 2 if encoder_rnn_bidirectional else 1
         
         self.emb = nn.Embedding(num_embeddings = vocab_size, embedding_dim = decoder_embedding_size, padding_idx = padding_idx)
         
-        self.rnn = nn.GRU(input_size = decoder_hidden_size + encoder_rnn_hidden_size + decoder_embedding_size,
-                          
+        self.rnn = nn.GRU( input_size = decoder_embedding_size, 
                           hidden_size = decoder_hidden_size, 
                           num_layers = decoder_num_layers, 
                           batch_first = batch_first, 
@@ -116,10 +123,13 @@ class RNNDecoder(nn.Module):
         # self.attention_layer = Attention(enc_hid_dim=encoder_input_dim, dec_hid_dim=decoder_hidden_size)
         self.attention_layer = DotProductAttention(enc_hid_dim=encoder_rnn_hidden_size, 
                                                    dec_hid_dim=decoder_hidden_size)
+        
+        self.projector = nn.Linear(in_features = (encoder_rnn_hidden_size * directions) + decoder_hidden_size, out_features = decoder_hidden_size)
               
-        self.predictor = nn.Linear(in_features = decoder_hidden_size * directions * decoder_num_layers, out_features = vocab_size)
+        self.predictor = nn.Linear(in_features = decoder_hidden_size, out_features = vocab_size)
         self.tanh_layer = nn.Tanh()
-                                
+        self.dropout = nn.Dropout(dropout)
+
     def forward(self, x: torch.LongTensor, encoder_outputs: torch.Tensor, hidden_state: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]: 
         """ Conducts a forward pass through the rnn decoder network.
         
@@ -135,29 +145,28 @@ class RNNDecoder(nn.Module):
         ## Add Batch dimension for unbatched inputs
 
         x_embedded = self.emb(x)
-        x_embedded = F.relu(x_embedded)
-                
-        alignment_scores = self.attention_layer(encoder_outputs, hidden_state.permute(1, 0, 2))
+        x_embedded = F.relu(self.dropout(x_embedded)) ##dropout then activate
+        
+        ##Run through the RNN
+        try:
+            outputs, hidden_state = self.rnn(x_embedded, hidden_state)
+        except:
+            print(f"x.shape: {x.shape}, x_embedded.shape: {x_embedded.shape}, hidden_state.shape: {hidden_state.shape}")
+            outputs, hidden_state = self.rnn(x_embedded, hidden_state)
+        
+        attention_weights = self.attention_layer(encoder_outputs, hidden_state)
         
         ##Apply the alignment scores to the encoder_hidden_states and calculate the weighted average
         ##context_vector shape == [batch_size, 1 , encoder_hidden_size]
-        context_vector = torch.bmm(alignment_scores.permute(0, 2, 1), encoder_outputs) ## context vector is how luong defines this
+        context_vector = torch.bmm(attention_weights.permute(0, 2, 1), encoder_outputs) ## context vector is how luong defines this
                 
         ## changing hidden_state from [seq, batch, hidden] to [batch, seq, hidden]
-        output = torch.concat([hidden_state.permute(1, 0, 2), context_vector], dim = -1)
+        concat = torch.concat([hidden_state.permute(1, 0, 2), context_vector], dim = -1)
         
-        combined_input = torch.cat([output, x_embedded], dim = -1)
-                
-        outputs, hidden_state = self.rnn(combined_input, hidden_state)
+        concat_proj = self.tanh_layer(self.projector(concat))
         
-        if isinstance(x_embedded, PackedSequence):
-            outputs, _ = pad_packed_sequence(outputs)
-        
-        if self.batch_first == True:
-            outputs = outputs.transpose(0, 1)
-            hidden_state = hidden_state.transpose(0, 1)
-        
-        outputs = F.log_softmax(self.predictor(outputs).squeeze(0), dim = -1)
+        outputs = self.predictor(concat_proj)
+        outputs = F.log_softmax(outputs, dim = -1)
         
         return outputs, hidden_state
 
@@ -175,7 +184,6 @@ class Model(nn.Module):
                 decoder_embedding_size: int = 300,
                 decoder_hidden_size: int = 256,
                 decoder_num_layers: int = 1,
-                decoder_bidirectional: int = False,
                 decoder_attn_size: int = 84,
                 dropout: float = 0.3,
                 padding_idx: int = 4,
@@ -189,9 +197,9 @@ class Model(nn.Module):
         super(Model, self).__init__(*args, **kwargs)
                 
         self.encoder_rnn_directions = 1 if encoder_rnn_bidirectional == False else 2
-        self.decoder_rnn_directions = 1 if decoder_bidirectional == False else 2
         
         self.encoder = Encoder(encoder_input_size = encoder_input_size,
+                               decoder_hidden_size = decoder_hidden_size,
                                conformer_num_heads=conformer_num_heads,
                                conformer_ffn_size = conformer_ffn_size,
                                conformer_num_layers=conformer_num_layers,
@@ -203,10 +211,10 @@ class Model(nn.Module):
                                )
         
         self.decoder = RNNDecoder(encoder_rnn_hidden_size = encoder_rnn_hidden_size,
+                                  encoder_rnn_bidirectional = encoder_rnn_bidirectional,
                                   decoder_embedding_size = decoder_embedding_size,
                                   decoder_hidden_size = decoder_hidden_size,
                                   decoder_num_layers = decoder_num_layers,
-                                  decoder_bidirectional = decoder_bidirectional,
                                   decoder_attn_size = decoder_attn_size,
                                   vocab_size = vocab_size,
                                   batch_first = batch_first,
@@ -220,7 +228,7 @@ class Model(nn.Module):
         self.vocab_size = vocab_size
         self.device = device
         
-        self.teacher_forcing = 0.75
+        self.teacher_forcing = 0.2
         
     def forward(self, x: torch.Tensor, x_lens: torch.Tensor, y: torch.Tensor, y_lens: torch.Tensor) -> torch.Tensor:
         """Forward pass used during Training.
@@ -251,24 +259,22 @@ class Model(nn.Module):
         ## predicted_tensor shape [max_seq_len, batch_size, vocab_size]
         predicted_tensor = torch.zeros(max_tgt_len, y.shape[0], self.vocab_size, device = self.device)
                 
-        decoder_inputs = y[:, 0].unsqueeze(1) ## the sos token
+        decoder_inputs = y[:, 0].unsqueeze(-1) ## the sos token
                 
         for i in range(0, max_tgt_len): 
-
             decoder_outputs, decoder_hidden_state = self.decoder(decoder_inputs, encoder_outputs, decoder_hidden_state)
-            decoder_hidden_state = decoder_hidden_state.permute(1, 0, 2)
+            decoder_hidden_state = decoder_hidden_state ## decoder hidden_state is [1, batch_size, hidden_size]
 
             topv, topi = torch.topk(decoder_outputs, k = 1, dim = -1) ## get the topv values and topindices, don't need right now might need for beam search
             
             if torch.rand(1) <= self.teacher_forcing:
-                
                 decoder_inputs = y[:, i + 1] ##because at i, the target is i+1
-                decoder_inputs = decoder_inputs.unsqueeze(1) ## Convert from [batch] to [batch, 1]
+                decoder_inputs = decoder_inputs.unsqueeze(-1) ## Convert from [batch] to [batch, 1]
                 
             else:
-                decoder_inputs = topi.squeeze(0) ## With no teacher forcing, might need to add code for teacher forcing
+                decoder_inputs = topi.squeeze(1)
             
-            predicted_tensor[i] = decoder_outputs
+            predicted_tensor[i] = decoder_outputs.squeeze(1)
         
         ##predicted_tensor is changed from [seq, batch, vocab_size] to [batch, seq , vocab_size]
         predicted_tensor = predicted_tensor.permute(1,0,2)

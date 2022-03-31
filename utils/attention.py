@@ -98,6 +98,8 @@ class DotProductAttention(nn.Module):
     def __init__(self, enc_hid_dim, dec_hid_dim):
         super().__init__()
         
-    def forward(self, encoder_outputs, hidden):
-        scores = torch.bmm(encoder_outputs, hidden.permute(1, 2, 0))
+    def forward(self, encoder_outputs, hidden_state):
+        hidden_state = hidden_state.permute(1, 2, 0).repeat(1, 2, 1) ##repeating because of bidirectional encoder
+        
+        scores = torch.bmm(encoder_outputs, hidden_state) 
         return F.softmax(scores, dim=1)
