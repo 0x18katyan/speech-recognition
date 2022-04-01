@@ -15,13 +15,13 @@ Refer to [Notes](https://github.com/0x18katyan/Notes/tree/master/Speech%20Recogn
 ## TODO
 
 - [x] DataLoading for CommonVoice dataset.
-- [x] Write Encoder-Decoder Model.
+- [x] Write Encoder-Decoder Model. ## The encoder-decoder model is still not following the RNNT or Conformer paper.
 - [ ] Add Transducer Model: RNN Language Model.
 - [ ] Train AutoRegressive Transducer Language Model on the Common Voice train data.
-- [ ] Calculate Cross Entropy Loss over the outputs.
-- [x] Calculate CTC Loss. (Obsolete: Conformer Paper doesn't use CTC, it is not mentioned anywere in the paper.)
+- [x] Calculate Cross Entropy Loss over the outputs. ## Will have to research on this, I probably don't know what's going on in the papers.
+- [x] Calculate CTC Loss. (Obsolete: Conformer Paper doesn't use CTC, it is not mentioned anywhere in the paper.)
 - [x] Write Training Loop
-- [x] Tensorboard Logging: Added Gradient Flow Logging and Loss Logging. 
+- [x] Tensorboard Logging: Added Gradient Flow Logging and Loss Logging.
 - [ ] PyTorch Lightning Training?
 - [ ] Inference Code
 
