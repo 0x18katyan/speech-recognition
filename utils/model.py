@@ -68,12 +68,15 @@ class Encoder(nn.Module):
         else:    
             outputs, output_lens = self.conformer.forward(x, x_lens)
         
-        packed_encoder_outputs = pack_padded_sequence(outputs, 
-                                                      lengths = output_lens.to(device = 'cpu', dtype=torch.int64), 
-                                                      batch_first = self.batch_first, 
-                                                      enforce_sorted = False)
+        outputs = pack_padded_sequence(outputs, 
+                                       lengths = output_lens.to(device = 'cpu', dtype=torch.int64), 
+                                       batch_first = self.batch_first, 
+                                       enforce_sorted = False)
         
-        outputs, hidden = self.rnn(x)
+        outputs, hidden = self.rnn(outputs)
+                
+        outputs, output_lens = pad_packed_sequence(outputs,
+                                                   batch_first = self.batch_first)
         
         concat_last_layer = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim = 1) ## Since, it is bidirectional, -2 and -1 are forward and backward pass of the last layer
         hidden = self.tanh_layer(self.proj_fc(concat_last_layer)) # project into decoder hidden_size

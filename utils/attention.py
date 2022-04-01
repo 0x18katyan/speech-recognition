@@ -99,6 +99,7 @@ class DotProductAttention(nn.Module):
         super().__init__()
         
     def forward(self, encoder_outputs, hidden_state):
+                
         hidden_state = hidden_state.permute(1, 2, 0).repeat(1, 2, 1) ##repeating because of bidirectional encoder
         
         scores = torch.bmm(encoder_outputs, hidden_state) 
