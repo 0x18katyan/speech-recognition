@@ -38,9 +38,14 @@ def plot_grad_flow_v2(named_parameters):
     with torch.no_grad():
         for n, p in named_parameters:
             if(p.requires_grad) and ("bias" not in n):
-                layers.append(n)            
-                ave_grads.append(p.grad.abs().mean().cpu()) ## Transfer grad tensor to CPU
-                max_grads.append(p.grad.abs().max().cpu())  ## Transfer grad tensor to CPU
+                
+                try:
+                    layers.append(n)            
+                    ave_grads.append(p.grad.abs().mean().cpu()) ## Transfer grad tensor to CPU
+                    max_grads.append(p.grad.abs().max().cpu())  ## Transfer grad tensor to CPU
+                except:
+                    print(f"parameter shape is: {p.shape}, parameter name is: {n}")
+                    
         plt.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
         plt.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b")
         plt.hlines(0, 0, len(ave_grads)+1, lw=2, color="k" )
