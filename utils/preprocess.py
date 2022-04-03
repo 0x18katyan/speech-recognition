@@ -63,7 +63,7 @@ class Preprocessing:
             raise TypeError(f"Audio with more than 2 channels are not supported. Wanted maximum of 2 channels, found {num_channels} channels.")
         
         elif self.out_channels == 1:
-            return torch.sum(waveform, dim = 0) / num_channels
+            return torch.sum(waveform, dim = 0, keepdim=True) / num_channels
         
         
     def standardize_sampling_rate(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
