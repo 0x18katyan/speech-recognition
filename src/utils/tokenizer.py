@@ -67,6 +67,7 @@ def get_tokenizer(tokenizer_file_path: str) -> PreTrainedTokenizerFast:
         tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file_path)
     finally:
         special_tokens_dict = {'bos_token': '[BOS]',
+                               'eos_token': '[EOS]',
                                'pad_token': '[PAD]',
                                'sep_token': '[SEP]',
                                'mask_token': '[MASK]'}
