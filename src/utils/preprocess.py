@@ -1,3 +1,4 @@
+import wave
 import torch
 from torchaudio import transforms as T
 
@@ -56,14 +57,14 @@ class Preprocessing:
         if num_channels == self.out_channels:
             return waveform
         
-        elif num_channels == 1:            
+        elif num_channels == 1 and self.out_channels == 2:          
             return torch.cat((waveform, waveform))
         
         elif num_channels > 2:
             raise TypeError(f"Audio with more than 2 channels are not supported. Wanted maximum of 2 channels, found {num_channels} channels.")
         
         elif self.out_channels == 1:
-            return torch.sum(waveform, dim = 0, keepdim=True) / num_channels
+            return torch.sum(waveform, dim = 0) / num_channels
         
         
     def standardize_sampling_rate(self, waveform: torch.Tensor, sampling_rate: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -139,12 +140,13 @@ class Preprocessing:
         
         
         waveform = self.standardize_channels(waveform)
-        
+
         ## Handling an edge case where source_sampling_rate == out_sampling_rate
         if sampling_rate != self.out_sampling_rate: 
             waveform, out_sampling_rate = self.standardize_sampling_rate(waveform, sampling_rate)
         else:
-            waveform, out_sampling_rate = waveform, sampling_rate
+            waveform =  waveform.squeeze(0) ## remove the first dimension for matching dimensions
+            out_sampling_rate = sampling_rate
         
         return waveform, out_sampling_rate
     
