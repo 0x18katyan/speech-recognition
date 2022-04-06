@@ -2,6 +2,7 @@ from sklearn import utils
 import torch
 import torch.nn as nn
 
+from typing import Tuple
 from src.model.attention import *
 
 class RNNDecoder(nn.Module):
@@ -51,6 +52,8 @@ class RNNDecoder(nn.Module):
               
         self.predictor = nn.Linear(in_features = decoder_hidden_size, out_features = vocab_size)
         self.tanh_layer = nn.Tanh()
+        self.softmax_layer = nn.LogSoftmax(dim = -1)
+        
         self.dropout = nn.Dropout(dropout)
         
 
@@ -90,6 +93,6 @@ class RNNDecoder(nn.Module):
         concat_proj = self.tanh_layer(self.projector(concat))
         
         outputs = self.predictor(concat_proj)
-        outputs = F.log_softmax(outputs, dim = -1)
+        outputs = self.softmax_layer(outputs)
         
         return outputs, hidden_state

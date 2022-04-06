@@ -28,8 +28,9 @@ class Model(nn.Module):
                 decoder_num_layers: int = 1,
                 decoder_attn_size: int = 84,
                 dropout: float = 0.3,
-                padding_idx: int = 4,
-                sos_token_id: int = 0,
+                padding_idx: int = 6,
+                sos_token_id: int = 1,
+                eos_token_id: int = 2,
                 vocab_size: int = 1000,
                 batch_first: bool = True,
                 device: str =  "cpu",
@@ -64,15 +65,16 @@ class Model(nn.Module):
                                   device = device,
                                   padding_idx = padding_idx
                                   )
-                
+        self.padding_idx = padding_idx
         self.sos_token_id = sos_token_id
+        self.eos_token_id = eos_token_id
         self.batch_first = batch_first
         self.vocab_size = vocab_size
         self.device = device
         
-        self.teacher_forcing = 0.2
+        self.teacher_forcing = 0.75
         
-        self.LM = get_model("data/model/custom-lm/checkpoint-340000/")
+        # self.LM = get_model("data/model/custom-lm/checkpoint-340000/")
 
         
     def forward(self, x: torch.Tensor, x_lens: torch.Tensor, y: torch.Tensor, y_lens: torch.Tensor) -> torch.Tensor:
@@ -98,13 +100,18 @@ class Model(nn.Module):
             bsz, msl, hdz = x.shape ##batch_size, max sequence length, hidden dimension size
         else:
             msl, bsz, hdz = x.shape
-                
+
+        ## Replace all the eos tokens in the decoder inputs to pad since we do not want to input eos tokens into the model
+        y[y== self.eos_token_id] = self.padding_idx 
+        
+        ## Select the sos token as the first input
+        decoder_inputs = y[:, 0].unsqueeze(-1) ## the sos token
+
         max_tgt_len = y.shape[-1] - 1 ## Minus the sos tokens
 
         ## predicted_tensor shape [max_seq_len, batch_size, vocab_size]
-        predicted_tensor = torch.zeros(max_tgt_len, y.shape[0], self.vocab_size, device = self.device)
-                
-        decoder_inputs = y[:, 0].unsqueeze(-1) ## the sos token
+        predicted_tensor = torch.zeros(max_tgt_len, y.shape[0], self.vocab_size, device = self.device)        
+        
 
         for i in range(0, max_tgt_len): 
             decoder_outputs, decoder_hidden_state = self.decoder(decoder_inputs, encoder_outputs, decoder_hidden_state)
@@ -112,11 +119,12 @@ class Model(nn.Module):
 
             topv, topi = torch.topk(decoder_outputs, k = 1, dim = -1) ## get the topv values and topindices, don't need right now might need for beam search
             
-            if torch.rand(1) <= self.teacher_forcing:
+            if torch.rand(1) <= self.teacher_forcing and self.training:
                 decoder_inputs = y[:, i + 1] ##because at i, the target is i+1
                 decoder_inputs = decoder_inputs.unsqueeze(-1) ## Convert from [batch] to [batch, 1]
                 
             else:
+                
                 decoder_inputs = topi.squeeze(1)
             
             predicted_tensor[i] = decoder_outputs.squeeze(1)
