@@ -12,17 +12,21 @@ class Collator:
     
     """
     
-    def __init__(self, tokenizer = None):
+    def __init__(self, tokenizer = None, special_tokens = True):
         """
         Initializes the Collator.
         
-        Args: tokenizer
+        Args: tokenizer, special_tokens
         
             tokenizer: Should be a HuggingFace PreTrained Tokenizer.
+            special_tokens: Add special tokens like <bos> and <eos> or not.
         
         """
+        if tokenizer == None:
+            raise ValueError("Please provide a valid tokenizer.")
         
         self.tokenizer = tokenizer
+        self.special_tokens = special_tokens
     
     @staticmethod
     def seed_worker(worker_id):
@@ -105,7 +109,8 @@ class Collator:
                                              return_tensors = 'pt', 
                                              return_attention_mask=False, 
                                              return_length = True, 
-                                             return_special_tokens_mask=True) ##Sentence Lengths required by CTC Loss
+                                             return_special_tokens_mask=True,
+                                             add_special_tokens = self.special_tokens) ##Sentence Lengths required by CTC Loss
         
         ## Tokenizer is just returning the maximum length of the batch rather than their true lengths
         token_lengths = tokenized_sentences['length'] - tokenized_sentences['special_tokens_mask'].sum(dim = 1)
