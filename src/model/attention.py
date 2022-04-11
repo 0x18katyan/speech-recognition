@@ -20,14 +20,13 @@ class BadhanauAttention(nn.Module):
         
         super(BadhanauAttention, self).__init__()
 
-        self.U_a = nn.Linear(in_features = encoder_hidden_size, out_features = attention_dim, bias = False)
+        ##specify directions
+        self.U_a = nn.Linear(in_features = encoder_hidden_size * 2, out_features = attention_dim, bias = False)
 
         self.W_a = nn.Linear(in_features = decoder_hidden_size, out_features = attention_dim, bias = False)
                 
         self.v_t = nn.Linear(in_features = attention_dim, out_features = 1, bias = False)
         
-        self.ffn = nn.Linear(in_features = encoder_hidden_size + decoder_hidden_size, out_features = decoder_hidden_size, bias = False)
-
         self.tanh_layer = nn.Tanh()
         
     def forward(self, encoder_hidden_states: torch.Tensor, decoder_hidden_state: torch.Tensor) -> torch.Tensor:
@@ -41,15 +40,11 @@ class BadhanauAttention(nn.Module):
             torch.Tensor: the alignment score of the encoder_hidden_states.
         """
         
-        print(f"""encoder_hidden_states.shape: {encoder_hidden_states.shape},
-              decoder_hidden_state.shape: {decoder_hidden_state.shape}""")
-                
-        
         U_a_out = self.U_a(encoder_hidden_states)        
         W_a_out = self.W_a(decoder_hidden_state)
         
         ## e_ij is also called energy?    
-        e_ij = self.tanh_layer(W_a_out + U_a_out)
+        e_ij = self.tanh_layer(W_a_out.permute(1, 0, 2) + U_a_out)
 
         e_ij = self.v_t(e_ij)
 
@@ -58,8 +53,7 @@ class BadhanauAttention(nn.Module):
         
         return alignment_scores
     
-##source: https://github.com/bentrevett/pytorch-seq2seq, used for validation
-    
+##source: https://github.com/bentrevett/pytorch-seq2seq, used for making sure other parts of code is working
 class Attention(nn.Module):
     def __init__(self, enc_hid_dim, dec_hid_dim):
         super().__init__()
@@ -69,17 +63,18 @@ class Attention(nn.Module):
         
     def forward(self, encoder_outputs, hidden):
         
-        #hidden = [batch size, dec hid dim]
-        #encoder_outputs = [src len, batch size, enc hid dim * 2]
+        ##adapting to the code
+        hidden = hidden.squeeze(0)
         
-        batch_size = encoder_outputs.shape[1]
-        src_len = encoder_outputs.shape[0]
+        #hidden = [batch size, dec hid dim]
+        #encoder_outputs = [batch size, src len, enc hid dim * 2]
+                
+        batch_size = encoder_outputs.shape[0]
+        src_len = encoder_outputs.shape[1]
         
         #repeat decoder hidden state src_len times
         hidden = hidden.unsqueeze(1).repeat(1, src_len, 1)
-        
-        encoder_outputs = encoder_outputs.permute(1, 0, 2)
-        
+                
         #hidden = [batch size, src len, dec hid dim]
         #encoder_outputs = [batch size, src len, enc hid dim * 2]
         
@@ -91,7 +86,7 @@ class Attention(nn.Module):
         
         #attention= [batch size, src len]
         
-        return F.softmax(attention, dim=1)
+        return F.softmax(attention, dim=1).unsqueeze(2) ##fixing for dimensions
     
     
 class DotProductAttention(nn.Module):
