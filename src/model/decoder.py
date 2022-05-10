@@ -44,9 +44,9 @@ class RNNDecoder(nn.Module):
         #                                          decoder_hidden_size = decoder_hidden_size, 
         #                                          attention_dim = decoder_attn_size)
         
-        # self.attention_layer = Attention(enc_hid_dim=encoder_input_dim, dec_hid_dim=decoder_hidden_size)
-        self.attention_layer = DotProductAttention(enc_hid_dim=encoder_rnn_hidden_size, 
-                                                   dec_hid_dim=decoder_hidden_size)
+        self.attention_layer = Attention(enc_hid_dim=encoder_rnn_hidden_size, dec_hid_dim=decoder_hidden_size)
+        # self.attention_layer = DotProductAttention(enc_hid_dim=encoder_rnn_hidden_size, 
+        #                                            dec_hid_dim=decoder_hidden_size)
         
         self.projector = nn.Linear(in_features = (encoder_rnn_hidden_size * directions) + decoder_hidden_size, out_features = decoder_hidden_size)
               

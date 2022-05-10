@@ -72,7 +72,7 @@ class Model(nn.Module):
         self.vocab_size = vocab_size
         self.device = device
         
-        self.teacher_forcing = 0.2
+        self.teacher_forcing = 0.5
         
         # self.LM = get_model("data/model/custom-lm/checkpoint-340000/")
 
